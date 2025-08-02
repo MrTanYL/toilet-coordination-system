@@ -567,6 +567,7 @@
         let gistId = null;
         let githubToken = null;
         let isUpdating = false;
+        let pollInterval = null;
 
         const classNames = ['Care', 'Charity', 'Faith', 'Grace', 'Hope', 'Joy', 'Love', 'Respect'];
 
@@ -804,7 +805,6 @@
             const data = {
                 classes: classes,
                 level: selectedLevel,
-                created: new Date().toISOString(),
                 lastUpdated: new Date().toISOString()
             };
 
@@ -896,6 +896,109 @@
             }
         }
 
+        async function loadTeacherView() {
+            // Load token if available
+            if (!githubToken) {
+                githubToken = localStorage.getItem('github_token');
+            }
+
+            const data = await loadGistData();
+            if (data) {
+                classes = data.classes;
+                
+                if (!classes[currentClass]) {
+                    showMessage('Invalid class access. Please check your link.', 'error', 'teacher-message-container');
+                    return;
+                }
+
+                showTeacherSection();
+                document.getElementById('current-class').textContent = currentClass;
+                renderClassesGrid();
+                
+                // Start polling for updates
+                pollInterval = setInterval(pollForUpdates, 2000);
+            } else {
+                showMessage('Could not load system data. Please check your connection.', 'error', 'teacher-message-container');
+            }
+        }
+
+        function renderClassesGrid() {
+            const grid = document.getElementById('classes-grid');
+            grid.innerHTML = '';
+
+            Object.keys(classes).forEach(className => {
+                const card = document.createElement('div');
+                card.className = `class-card ${classes[className]}`;
+                
+                const isCurrentClass = className === currentClass;
+                const hasOccupiedClass = Object.values(classes).includes('occupied');
+                const showWarning = !isCurrentClass && hasOccupiedClass && classes[className] === 'vacant';
+                const showEmergencyWarning = isCurrentClass && hasOccupiedClass && classes[currentClass] === 'vacant';
+
+                card.innerHTML = `
+                    <div class="class-name">${className}</div>
+                    <div class="status-display">
+                        ${classes[className] === 'vacant' ? 'VACANT' : 'STUDENT AT TOILET'}
+                    </div>
+                    ${isCurrentClass ? `
+                        ${showEmergencyWarning ? '<div class="emergency-warning">⚠️ ANOTHER CLASS OCCUPIED - EMERGENCY ONLY? ⚠️</div>' : ''}
+                        <button class="toggle-btn ${classes[className]}" onclick="toggleClassStatus('${className}')" ${isUpdating ? 'disabled' : ''}>
+                            ${classes[className] === 'vacant' ? 'Send Student to Toilet' : 'Mark Student Returned'}
+                        </button>
+                    ` : `
+                        ${showWarning ? '<div class="warning">⚠️ Toilet Available</div>' : ''}
+                        <div style="color: #6c757d; font-style: italic;">
+                            ${isCurrentClass ? 'Your Class' : 'Other Class'}
+                        </div>
+                    `}
+                `;
+
+                grid.appendChild(card);
+            });
+        }
+
+        async function toggleClassStatus(className) {
+            if (className !== currentClass || isUpdating) return;
+
+            isUpdating = true;
+            const newStatus = classes[className] === 'vacant' ? 'occupied' : 'vacant';
+            classes[className] = newStatus;
+
+            // Update UI immediately
+            renderClassesGrid();
+            showSyncStatus('Updating...', 'syncing');
+
+            // Update gist
+            await updateGist();
+            
+            isUpdating = false;
+            renderClassesGrid();
+        }
+
+        async function pollForUpdates() {
+            if (isUpdating) return;
+
+            const data = await loadGistData();
+            if (data && JSON.stringify(data.classes) !== JSON.stringify(classes)) {
+                classes = data.classes;
+                renderClassesGrid();
+                showSyncStatus('Updated', 'success');
+            }
+        }
+
+        function showSyncStatus(message, type = 'success') {
+            const statusEl = document.getElementById('sync-status');
+            statusEl.textContent = message;
+            statusEl.className = 'sync-status ' + (type === 'syncing' ? 'syncing' : type === 'error' ? 'error' : '');
+            statusEl.style.display = 'block';
+            
+            if (type !== 'syncing') {
+                setTimeout(() => {
+                    statusEl.style.display = 'none';
+                }, 2000);
+            }
+        }
+
         function generateQRCode(text, size = 128) {
             const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${encodeURIComponent(text)}&ecc=M`;
             return qrUrl;
@@ -943,3 +1046,71 @@
                         <img src="${qrCodeUrl}" alt="QR Code for ${className}" class="qr-code" width="120" height="120">
                         <div class="qr-label">Scan to Access</div>
                     </div>
+                    <div class="link-info">
+                        <div class="class-title">${className}</div>
+                        <a href="${fullUrl}" class="access-link" target="_blank">Open Teacher Interface</a>
+                        <div class="url-display">${fullUrl}</div>
+                        <button onclick="copyToClipboard('${fullUrl}')" style="background:#28a745; color:white; border:none; padding:5px 10px; border-radius:3px; margin-top:5px; cursor:pointer;">📋 Copy Link</button>
+                    </div>
+                `;
+                
+                linksContainer.appendChild(accessItem);
+            });
+
+            accessLinksDiv.style.display = 'block';
+        }
+
+        function copyToClipboard(text) {
+            if (navigator.clipboard) {
+                navigator.clipboard.writeText(text).then(function() {
+                    showSyncStatus('Link copied!', 'success');
+                }).catch(function(err) {
+                    fallbackCopyTextToClipboard(text);
+                });
+            } else {
+                fallbackCopyTextToClipboard(text);
+            }
+        }
+
+        function fallbackCopyTextToClipboard(text) {
+            const textArea = document.createElement("textarea");
+            textArea.value = text;
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            try {
+                document.execCommand('copy');
+                showSyncStatus('Link copied!', 'success');
+            } catch (err) {
+                alert('Unable to copy. Please copy manually: ' + text);
+            }
+            document.body.removeChild(textArea);
+        }
+
+        function backToSetup() {
+            // Clear polling interval
+            if (pollInterval) {
+                clearInterval(pollInterval);
+            }
+            
+            if (gistId) {
+                window.location.href = `${window.location.pathname}?gist=${gistId}`;
+            } else {
+                window.location.href = window.location.pathname;
+            }
+        }
+
+        // Initialize when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            init();
+        });
+
+        // Clean up on page unload
+        window.addEventListener('beforeunload', function() {
+            if (pollInterval) {
+                clearInterval(pollInterval);
+            }
+        });
+    </script>
+</body>
+</html>
