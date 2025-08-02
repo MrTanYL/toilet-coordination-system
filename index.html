@@ -416,7 +416,7 @@
     </div>
 
     <script>
-        // Global state
+        // Global state - now stored in URL parameters for sharing
         let classes = {};
         let currentClass = null;
         let isTeacher = false;
@@ -429,14 +429,20 @@
         function init() {
             const urlParams = new URLSearchParams(window.location.search);
             const classParam = urlParams.get('class');
+            const setupParam = urlParams.get('setup');
             
             if (classParam) {
                 // Teacher view
                 isTeacher = true;
                 currentClass = decodeURIComponent(classParam);
-                loadTeacherView();
+                loadTeacherViewFromURL();
+            } else if (setupParam) {
+                // Load existing setup from URL
+                loadSetupFromURL(setupParam);
+                showSetupSection();
+                populateClassesSelection();
             } else {
-                // Setup view
+                // Fresh setup view
                 showSetupSection();
                 populateClassesSelection();
             }
