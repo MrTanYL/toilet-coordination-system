@@ -409,6 +409,14 @@
             <h2 id="teacher-title">Teacher Dashboard</h2>
             <p id="teacher-class">Managing: <span id="current-class"></span></p>
 
+            <!-- Debug info section (can be removed later) -->
+            <div id="debug-info" style="background: #f8f9fa; padding: 10px; margin: 10px 0; border-radius: 5px; font-size: 12px; color: #666;">
+                <strong>Debug Info:</strong>
+                <div>Current URL: <span id="debug-url"></span></div>
+                <div>Class Parameter: <span id="debug-class"></span></div>
+                <div>Setup Parameter: <span id="debug-setup"></span></div>
+            </div>
+
             <div id="classes-grid" class="class-grid">
                 <!-- Classes will be populated here -->
             </div>
@@ -456,6 +464,12 @@
         function showTeacherSection() {
             document.getElementById('setup-section').style.display = 'none';
             document.getElementById('teacher-section').style.display = 'block';
+            
+            // Update debug info
+            const urlParams = new URLSearchParams(window.location.search);
+            document.getElementById('debug-url').textContent = window.location.href;
+            document.getElementById('debug-class').textContent = urlParams.get('class') || 'None';
+            document.getElementById('debug-setup').textContent = urlParams.get('setup') ? 'Present' : 'Missing';
         }
 
         function populateClassesSelection() {
