@@ -692,7 +692,16 @@
         }
 
         // Initialize when page loads
-        init();
+        document.addEventListener('DOMContentLoaded', function() {
+            init();
+        });
+        
+        // Backup initialization in case DOMContentLoaded doesn't fire
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', init);
+        } else {
+            init();
+        }
     </script>
 </body>
 </html>
