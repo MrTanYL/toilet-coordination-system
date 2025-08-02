@@ -352,9 +352,34 @@
         .no-selection {
             color: #6c757d;
         }
+
+        .sync-status {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 10px 15px;
+            background-color: #28a745;
+            color: white;
+            border-radius: 5px;
+            font-size: 14px;
+            display: none;
+            z-index: 1000;
+        }
+
+        .sync-status.syncing {
+            background-color: #ffc107;
+            color: #000;
+        }
+
+        .sync-status.error {
+            background-color: #dc3545;
+            color: white;
+        }
     </style>
 </head>
 <body>
+    <div class="sync-status" id="sync-status">Synced</div>
+    
     <div class="container">
         <div class="header">
             <h1>Toilet Coordination System</h1>
@@ -409,14 +434,6 @@
             <h2 id="teacher-title">Teacher Dashboard</h2>
             <p id="teacher-class">Managing: <span id="current-class"></span></p>
 
-            <!-- Debug info section (can be removed later) -->
-            <div id="debug-info" style="background: #f8f9fa; padding: 10px; margin: 10px 0; border-radius: 5px; font-size: 12px; color: #666;">
-                <strong>Debug Info:</strong>
-                <div>Current URL: <span id="debug-url"></span></div>
-                <div>Class Parameter: <span id="debug-class"></span></div>
-                <div>Setup Parameter: <span id="debug-setup"></span></div>
-            </div>
-
             <div id="classes-grid" class="class-grid">
                 <!-- Classes will be populated here -->
             </div>
@@ -424,31 +441,54 @@
     </div>
 
     <script>
-        // Global state - now stored in URL parameters for sharing
+        // Global state
         let classes = {};
         let currentClass = null;
         let isTeacher = false;
         let selectedLevel = '';
         let selectedClasses = [];
+        let setupId = null;
 
         const classNames = ['Care', 'Charity', 'Faith', 'Grace', 'Hope', 'Joy', 'Love', 'Respect'];
+
+        // Generate a unique setup ID
+        function generateSetupId() {
+            return Date.now().toString(36) + Math.random().toString(36).substr(2);
+        }
+
+        // Encode state to base64
+        function encodeState(state) {
+            return btoa(JSON.stringify(state));
+        }
+
+        // Decode state from base64
+        function decodeState(encoded) {
+            try {
+                return JSON.parse(atob(encoded));
+            } catch (e) {
+                console.error('Failed to decode state:', e);
+                return null;
+            }
+        }
 
         // Initialize the application
         function init() {
             const urlParams = new URLSearchParams(window.location.search);
             const classParam = urlParams.get('class');
+            const stateParam = urlParams.get('state');
             const setupParam = urlParams.get('setup');
             
-            if (classParam) {
-                // Teacher view
+            if (classParam && stateParam) {
+                // Teacher view with state
                 isTeacher = true;
                 currentClass = decodeURIComponent(classParam);
-                loadTeacherViewFromURL();
+                setupId = urlParams.get('setup');
+                loadTeacherViewFromURL(stateParam);
             } else if (setupParam) {
-                // Load existing setup from URL
-                loadSetupFromURL(setupParam);
+                // Load existing setup
+                setupId = setupParam;
+                pollForState();
                 showSetupSection();
-                populateClassesSelection();
             } else {
                 // Fresh setup view
                 showSetupSection();
@@ -464,12 +504,6 @@
         function showTeacherSection() {
             document.getElementById('setup-section').style.display = 'none';
             document.getElementById('teacher-section').style.display = 'block';
-            
-            // Update debug info
-            const urlParams = new URLSearchParams(window.location.search);
-            document.getElementById('debug-url').textContent = window.location.href;
-            document.getElementById('debug-class').textContent = urlParams.get('class') || 'None';
-            document.getElementById('debug-setup').textContent = urlParams.get('setup') ? 'Present' : 'Missing';
         }
 
         function populateClassesSelection() {
@@ -563,23 +597,47 @@
                 return;
             }
 
+            // Generate unique setup ID
+            setupId = generateSetupId();
+
             // Initialize classes state with formatted names
             classes = {};
             selectedClasses.forEach(className => {
                 const formattedName = `${selectedLevel} ${className}`;
-                classes[formattedName] = 'vacant'; // 'vacant' or 'occupied'
+                classes[formattedName] = 'vacant';
             });
 
-            // Save to localStorage for persistence
-            localStorage.setItem('toiletSystem_classes', JSON.stringify(classes));
-            localStorage.setItem('toiletSystem_level', selectedLevel);
+            // Save state for this setup
+            saveState();
 
             // Generate access links
             generateAccessLinks();
         }
 
+        function saveState() {
+            if (setupId) {
+                localStorage.setItem(`toiletSystem_${setupId}`, JSON.stringify({
+                    classes: classes,
+                    level: selectedLevel,
+                    timestamp: Date.now()
+                }));
+            }
+        }
+
+        function loadState() {
+            if (setupId) {
+                const saved = localStorage.getItem(`toiletSystem_${setupId}`);
+                if (saved) {
+                    const data = JSON.parse(saved);
+                    classes = data.classes;
+                    selectedLevel = data.level;
+                    return true;
+                }
+            }
+            return false;
+        }
+
         function generateQRCode(text, size = 128) {
-            // Use qr-server.com API for QR Code generation
             const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${encodeURIComponent(text)}&ecc=M`;
             return qrUrl;
         }
@@ -590,25 +648,46 @@
             
             linksContainer.innerHTML = '';
             
+            // Add master control link first
+            const masterUrl = `${window.location.origin}${window.location.pathname}?setup=${setupId}`;
+            const masterItem = document.createElement('div');
+            masterItem.className = 'access-item';
+            masterItem.style.backgroundColor = '#e8f5e9';
+            
+            masterItem.innerHTML = `
+                <div class="qr-container">
+                    <img src="${generateQRCode(masterUrl, 150)}" alt="QR Code for Master Control" class="qr-code" width="120" height="120">
+                    <div class="qr-label">Master Control</div>
+                </div>
+                <div class="link-info">
+                    <div class="class-title">🎛️ Master Control Panel</div>
+                    <a href="${masterUrl}" class="access-link" target="_blank" style="background-color: #4caf50;">Open Master Control</a>
+                    <div class="url-display">${masterUrl}</div>
+                    <button onclick="copyToClipboard('${masterUrl}')" style="background:#28a745; color:white; border:none; padding:5px 10px; border-radius:3px; margin-top:5px; cursor:pointer;">📋 Copy Link</button>
+                    <div style="color: #666; font-size: 12px; margin-top: 5px;">Share this link to allow others to see all class statuses</div>
+                </div>
+            `;
+            
+            linksContainer.appendChild(masterItem);
+            
+            // Add individual class links
             Object.keys(classes).forEach(className => {
                 const baseUrl = window.location.origin + window.location.pathname;
-                const fullUrl = `${baseUrl}?class=${encodeURIComponent(className)}`;
+                const state = encodeState(classes);
+                const fullUrl = `${baseUrl}?class=${encodeURIComponent(className)}&state=${state}&setup=${setupId}`;
                 const qrCodeUrl = generateQRCode(fullUrl, 150);
-                
-                console.log('Generated URL for', className, ':', fullUrl); // Debug log
                 
                 const accessItem = document.createElement('div');
                 accessItem.className = 'access-item';
                 
                 accessItem.innerHTML = `
                     <div class="qr-container">
-                        <img src="${qrCodeUrl}" alt="QR Code for ${className}" class="qr-code" width="120" height="120" 
-                             onerror="this.style.border='2px solid red'; this.alt='QR Code Error';">
+                        <img src="${qrCodeUrl}" alt="QR Code for ${className}" class="qr-code" width="120" height="120">
                         <div class="qr-label">Scan to Access</div>
                     </div>
                     <div class="link-info">
                         <div class="class-title">${className}</div>
-                        <a href="${fullUrl}" class="access-link" target="_blank" onclick="testLink('${className}')">Open Teacher Interface</a>
+                        <a href="${fullUrl}" class="access-link" target="_blank">Open Teacher Interface</a>
                         <div class="url-display">${fullUrl}</div>
                         <button onclick="copyToClipboard('${fullUrl}')" style="background:#28a745; color:white; border:none; padding:5px 10px; border-radius:3px; margin-top:5px; cursor:pointer;">📋 Copy Link</button>
                     </div>
@@ -620,15 +699,10 @@
             accessLinksDiv.style.display = 'block';
         }
 
-        function testLink(className) {
-            console.log('Testing link for:', className);
-            console.log('Current classes in memory:', classes);
-        }
-
         function copyToClipboard(text) {
             if (navigator.clipboard) {
                 navigator.clipboard.writeText(text).then(function() {
-                    alert('Link copied to clipboard!');
+                    showSyncStatus('Link copied!', 'success');
                 }).catch(function(err) {
                     fallbackCopyTextToClipboard(text);
                 });
@@ -645,23 +719,22 @@
             textArea.select();
             try {
                 document.execCommand('copy');
-                alert('Link copied to clipboard!');
+                showSyncStatus('Link copied!', 'success');
             } catch (err) {
                 alert('Unable to copy. Please copy manually: ' + text);
             }
             document.body.removeChild(textArea);
         }
 
-        function loadTeacherView() {
-            // Load classes from localStorage
-            const savedClasses = localStorage.getItem('toiletSystem_classes');
-            if (savedClasses) {
-                classes = JSON.parse(savedClasses);
-            } else {
-                alert('System not set up. Please run setup first.');
+        function loadTeacherViewFromURL(stateParam) {
+            const state = decodeState(stateParam);
+            if (!state) {
+                alert('Invalid access link. Please check your URL.');
                 return;
             }
 
+            classes = state;
+            
             if (!classes[currentClass]) {
                 alert('Invalid class access. Please check your link.');
                 return;
@@ -671,8 +744,8 @@
             document.getElementById('current-class').textContent = currentClass;
             renderClassesGrid();
             
-            // Start polling for updates every 2 seconds
-            setInterval(pollForUpdates, 2000);
+            // Start polling for updates
+            setInterval(pollForState, 2000);
         }
 
         function renderClassesGrid() {
@@ -716,49 +789,78 @@
             const newStatus = classes[className] === 'vacant' ? 'occupied' : 'vacant';
             classes[className] = newStatus;
 
-            // Save to localStorage
-            localStorage.setItem('toiletSystem_classes', JSON.stringify(classes));
+            // Save state
+            saveState();
+            
+            // Update URL with new state
+            updateURLState();
             
             // Re-render
             renderClassesGrid();
+            
+            showSyncStatus('Status updated', 'syncing');
         }
 
-        function pollForUpdates() {
-            // In a real implementation, this would check with a server
-            // For this demo, we'll just reload from localStorage to simulate updates
-            const savedClasses = localStorage.getItem('toiletSystem_classes');
-            if (savedClasses) {
-                const newClasses = JSON.parse(savedClasses);
-                let hasChanges = false;
-                
-                Object.keys(newClasses).forEach(className => {
-                    if (classes[className] !== newClasses[className]) {
-                        hasChanges = true;
-                    }
-                });
+        function updateURLState() {
+            const state = encodeState(classes);
+            const newUrl = `${window.location.pathname}?class=${encodeURIComponent(currentClass)}&state=${state}&setup=${setupId}`;
+            window.history.replaceState({}, '', newUrl);
+        }
 
-                if (hasChanges) {
-                    classes = newClasses;
-                    renderClassesGrid();
+        function pollForState() {
+            if (!setupId) return;
+            
+            // Load latest state from localStorage
+            if (loadState()) {
+                renderClassesGrid();
+            }
+        }
+
+        function showSyncStatus(message, type = 'success') {
+            const statusEl = document.getElementById('sync-status');
+            statusEl.textContent = message;
+            statusEl.className = 'sync-status ' + (type === 'syncing' ? 'syncing' : type === 'error' ? 'error' : '');
+            statusEl.style.display = 'block';
+            
+            setTimeout(() => {
+                statusEl.style.display = 'none';
+            }, 2000);
+        }
+
+        function backToSetup() {
+            if (setupId) {
+                window.location.href = `${window.location.pathname}?setup=${setupId}`;
+            } else {
+                window.location.href = window.location.pathname;
+            }
+        }
+
+        // Clean up old setups (older than 24 hours)
+        function cleanupOldSetups() {
+            const now = Date.now();
+            const maxAge = 24 * 60 * 60 * 1000; // 24 hours
+            
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && key.startsWith('toiletSystem_')) {
+                    try {
+                        const data = JSON.parse(localStorage.getItem(key));
+                        if (data.timestamp && (now - data.timestamp) > maxAge) {
+                            localStorage.removeItem(key);
+                        }
+                    } catch (e) {
+                        // Invalid data, remove it
+                        localStorage.removeItem(key);
+                    }
                 }
             }
         }
 
-        function backToSetup() {
-            window.location.href = window.location.pathname;
-        }
-
         // Initialize when page loads
         document.addEventListener('DOMContentLoaded', function() {
+            cleanupOldSetups();
             init();
         });
-        
-        // Backup initialization in case DOMContentLoaded doesn't fire
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', init);
-        } else {
-            init();
-        }
     </script>
 </body>
 </html>
